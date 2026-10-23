@@ -770,31 +770,12 @@ function setupEventHandlers() {
     dom.audioPlayer.addEventListener("ended", () => autoPlayNext(state, dom, getAudioCallbacks()));
     dom.audioPlayer.addEventListener("timeupdate", () => {
         const currentTime = dom.audioPlayer.currentTime || 0;
-        // iOS Safari 对流式 MP3 常先报一个偏短的估算时长、播放中再修正：
-        // 进度条总长必须跟随修正，否则条会先走完而歌曲还没播完
-        const reportedDuration = dom.audioPlayer.duration;
-        if (Number.isFinite(reportedDuration) && reportedDuration > Number(dom.progressBar.max || 0)) {
-            dom.progressBar.max = reportedDuration;
-            dom.durationDisplay.textContent = formatTime(reportedDuration);
-        }
-        if (!dom.audioPlayer.ended && currentTime > Number(dom.progressBar.max || 0)) {
-            dom.progressBar.max = currentTime;
-            dom.durationDisplay.textContent = formatTime(currentTime);
-        }
         if (!state.isSeeking) {
             dom.progressBar.value = currentTime;
             dom.currentTimeDisplay.textContent = formatTime(currentTime);
             updateProgressBarBackground(dom, currentTime, Number(dom.progressBar.max));
         }
         syncLyrics(state, dom);
-    });
-    dom.audioPlayer.addEventListener("durationchange", () => {
-        const reportedDuration = dom.audioPlayer.duration;
-        if (Number.isFinite(reportedDuration) && reportedDuration > Number(dom.progressBar.max || 0)) {
-            dom.progressBar.max = reportedDuration;
-            dom.durationDisplay.textContent = formatTime(reportedDuration);
-            updateProgressBarBackground(dom, Number(dom.progressBar.value || 0), reportedDuration);
-        }
     });
     dom.audioPlayer.addEventListener("loadedmetadata", () => {
         const duration = dom.audioPlayer.duration || 0;
