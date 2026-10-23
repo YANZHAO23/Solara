@@ -18,80 +18,6 @@ export const playModeTexts = {
 const audioUrlMemoryCache = new Map();
 const AUDIO_URL_CACHE_TTL = 15 * 60 * 1000;
 
-// 下一首直链预取：当前歌曲开始播放后，提前把下一首的直链解析进上面的内存缓存。
-// 锁屏/后台时 iOS 会冻结页面 JS，自动切歌若还要现发一次网络请求很容易失败；
-// 预取让切歌直接命中缓存、零网络往返，把后台续播的成功率提上去。
-const prefetchInFlight = new Set();
-
-function computeUpcomingSong(state) {
-    if (state.currentList === "favorite") {
-        const favorites = ensureFavoriteSongsArray(state);
-        if (favorites.length === 0) return null;
-        const mode = state.favoritePlayMode || "list";
-        if (mode === "single") return null;
-        let nextIndex;
-        if (mode === "random") {
-            const pick = state.__prefetchedNextPick;
-            if (pick && pick.context === "favorite" && pick.fromIndex === state.currentFavoriteIndex) {
-                nextIndex = pick.index;
-            } else {
-                nextIndex = Math.floor(Math.random() * favorites.length);
-                state.__prefetchedNextPick = { context: "favorite", fromIndex: state.currentFavoriteIndex, index: nextIndex };
-            }
-        } else {
-            nextIndex = (state.currentFavoriteIndex + 1) % favorites.length;
-        }
-        return favorites[nextIndex] || null;
-    }
-
-    let playlist = [];
-    if (state.currentPlaylist === "playlist") playlist = state.playlistSongs;
-    else if (state.currentPlaylist === "online") playlist = state.onlineSongs;
-    else if (state.currentPlaylist === "search") playlist = state.searchResults;
-    if (!playlist || playlist.length === 0) return null;
-
-    const mode = state.playMode || "list";
-    if (mode === "single") return null;
-    let nextIndex;
-    if (mode === "random") {
-        const pick = state.__prefetchedNextPick;
-        if (pick && pick.context === state.currentPlaylist && pick.fromIndex === state.currentTrackIndex) {
-            nextIndex = pick.index;
-        } else {
-            nextIndex = Math.floor(Math.random() * playlist.length);
-            state.__prefetchedNextPick = { context: state.currentPlaylist, fromIndex: state.currentTrackIndex, index: nextIndex };
-        }
-    } else {
-        nextIndex = (state.currentTrackIndex + 1) % playlist.length;
-    }
-    return playlist[nextIndex] || null;
-}
-
-export function prefetchNextSongUrl(state) {
-    try {
-        const nextSong = computeUpcomingSong(state);
-        if (!nextSong || nextSong.id == null) return;
-        const current = state.currentSong;
-        if (current && String(current.id) === String(nextSong.id) && (current.source || 'netease') === (nextSong.source || 'netease')) return;
-        const quality = state.playbackQuality || '320';
-        const cacheKey = `${nextSong.source || 'netease'}_${nextSong.id}_${quality}`;
-        const cached = audioUrlMemoryCache.get(cacheKey);
-        if (cached && Date.now() - cached.timestamp < AUDIO_URL_CACHE_TTL && cached.url) return;
-        if (prefetchInFlight.has(cacheKey)) return;
-        prefetchInFlight.add(cacheKey);
-        API.fetchJson(API.getSongUrl(nextSong, quality))
-            .then((audioData) => {
-                if (audioData && audioData.url) {
-                    audioUrlMemoryCache.set(cacheKey, { url: audioData.url, timestamp: Date.now() });
-                }
-            })
-            .catch(() => { /* 预取失败静默忽略，切歌时仍会走正常请求 */ })
-            .finally(() => { prefetchInFlight.delete(cacheKey); });
-    } catch (_) {
-        /* 预取是尽力而为，任何异常都不影响当前播放 */
-    }
-}
-
 export const APPLE_SVG_ICONS = {
     play: `<svg class="apple-svg-icon icon-play" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5.5v13a1.5 1.5 0 0 0 2.3 1.28l10.5-6.5a1.5 1.5 0 0 0 0-2.56L9.3 4.22A1.5 1.5 0 0 0 7 5.5z"/></svg>`,
     pause: `<svg class="apple-svg-icon icon-pause" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 5a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1zm11 0a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h1z"/></svg>`,
@@ -500,9 +426,6 @@ export async function playSong(song, options = {}, state, dom, callbacks = {}, d
             updatePlayPauseButton(dom);
         }
 
-        // 提前解析下一首直链进内存缓存，为锁屏/后台自动切歌省去一次网络往返
-        prefetchNextSongUrl(state);
-
         // 异步延迟调度封面、歌词与极光色彩应用
         if (typeof callbacks.scheduleDeferredSongAssets === "function") {
             callbacks.scheduleDeferredSongAssets(song, playPromise);
@@ -550,13 +473,7 @@ export function playNext(state, dom, callbacks = {}) {
         const mode = state.favoritePlayMode || "list";
         let nextIndex = state.currentFavoriteIndex;
         if (mode === "random") {
-            const pick = state.__prefetchedNextPick;
-            if (pick && pick.context === "favorite" && pick.fromIndex === state.currentFavoriteIndex && pick.index >= 0 && pick.index < favorites.length) {
-                nextIndex = pick.index;
-            } else {
-                nextIndex = Math.floor(Math.random() * favorites.length);
-            }
-            state.__prefetchedNextPick = null;
+            nextIndex = Math.floor(Math.random() * favorites.length);
         } else if (mode === "list") {
             nextIndex = (state.currentFavoriteIndex + 1) % favorites.length;
         }
@@ -587,13 +504,7 @@ export function playNext(state, dom, callbacks = {}) {
 
     const mode = state.playMode || "list";
     if (mode === "random") {
-        const pick = state.__prefetchedNextPick;
-        if (pick && pick.context === state.currentPlaylist && pick.fromIndex === state.currentTrackIndex && pick.index >= 0 && pick.index < playlist.length) {
-            nextIndex = pick.index;
-        } else {
-            nextIndex = Math.floor(Math.random() * playlist.length);
-        }
-        state.__prefetchedNextPick = null;
+        nextIndex = Math.floor(Math.random() * playlist.length);
     } else if (mode === "list") {
         nextIndex = (state.currentTrackIndex + 1) % playlist.length;
     } else if (mode === "single") {
