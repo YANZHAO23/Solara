@@ -125,6 +125,7 @@ import {
     cancelPendingPlayback
 } from "./core/audio.js";
 import { initMediaSession } from "./core/media-session.js";
+import { initListenTogether } from "./features/listen-together.js";
 
 const debugLog = createDebugLogger(state, dom);
 initDebugShortcut(state, dom, debugLog);
@@ -1606,6 +1607,7 @@ export async function bootstrap() {
         autoPlayNext: () => autoPlayNext(state, dom, getAudioCallbacks()),
         updatePlayPauseButton: () => updatePlayPauseButton(dom)
     });
+    initListenTogether(state, dom, { playPlaylistSong });
 
     // 渲染初始界面
     renderPlaylist(state, dom, getPlaylistCallbacks());
